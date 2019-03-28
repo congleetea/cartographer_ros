@@ -45,6 +45,10 @@ static auto* kWorkQueueDelayMetric = metrics::Gauge::Null();
 static auto* kConstraintsSameTrajectoryMetric = metrics::Gauge::Null();
 static auto* kConstraintsDifferentTrajectoryMetric = metrics::Gauge::Null();
 
+/**
+ * 实例化PoseGraph2D:
+ *  contraint_builder_: 查找node和子图之间的约束。  
+ */
 PoseGraph2D::PoseGraph2D(
     const proto::PoseGraphOptions& options,
     std::unique_ptr<optimization::OptimizationProblem2D> optimization_problem,
@@ -53,6 +57,9 @@ PoseGraph2D::PoseGraph2D(
       optimization_problem_(std::move(optimization_problem)),
       constraint_builder_(options_.constraint_builder_options(), thread_pool),
       thread_pool_(thread_pool) {
+  /**
+   * 如果设置has_overlapping_submaps_trimmer_2d, 设置一个定时器，定时处理重叠部分的优化。 
+   */
   if (options.has_overlapping_submaps_trimmer_2d()) {
     const auto& trimmer_options = options.overlapping_submaps_trimmer_2d();
     AddTrimmer(absl::make_unique<OverlappingSubmapsTrimmer2D>(

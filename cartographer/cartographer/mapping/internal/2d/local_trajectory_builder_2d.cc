@@ -35,6 +35,15 @@ static auto* kCeresScanMatcherCostMetric = metrics::Histogram::Null();
 static auto* kScanMatcherResidualDistanceMetric = metrics::Histogram::Null();
 static auto* kScanMatcherResidualAngleMetric = metrics::Histogram::Null();
 
+/**
+ * 使用距离传感器构建LocalTrajectoryBuilder2D。 
+ * 1. 初始化active_submaps.
+ * 2. 初始化motion_filter.
+ * 3. real_time_correlative_scan_matcher_
+ * 4. ceres_scan_matcher_
+ * 5. range_data_collator_
+ */
+
 LocalTrajectoryBuilder2D::LocalTrajectoryBuilder2D(
     const proto::LocalTrajectoryBuilderOptions2D& options,
     const std::vector<std::string>& expected_range_sensor_ids)

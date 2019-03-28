@@ -181,6 +181,9 @@ void SensorBridge::HandlePointCloud2Message(
 
 const TfBridge& SensorBridge::tf_bridge() const { return tf_bridge_; }
 
+/**
+ * 真正处理laser scan的地方在这里。 
+ */
 void SensorBridge::HandleLaserScan(
     const std::string& sensor_id, const carto::common::Time time,
     const std::string& frame_id,

@@ -47,20 +47,39 @@ DEFINE_string(
 namespace cartographer_ros {
 namespace {
 
+/**
+ * 这里是主函数。
+ * 1. 监听tf转换.
+ * 2. 获取参数: node, trajectory的参数.
+ * 3. 创建map_builder.
+ */
 void Run() {
   constexpr double kTfBufferCacheTimeInSeconds = 10.;
   tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
   tf2_ros::TransformListener tf(tf_buffer);
+
+  /**
+   * 加载参数。
+   * std::tie 将LoadOptions得到的参数放在node_options,trajectory_options中。
+   */
   NodeOptions node_options;
   TrajectoryOptions trajectory_options;
   std::tie(node_options, trajectory_options) =
       LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename);
 
+  /**
+   * 这是最关键的一个对象，用来建图。
+   * absl是使用cpp11来实现cpp14和17的一些功能。
+   */
   auto map_builder = absl::make_unique<cartographer::mapping::MapBuilder>(
       node_options.map_builder_options);
+
+  /**
+   * 实例化node，启动一些Services，和消息发布器。
+   */
   Node node(node_options, std::move(map_builder), &tf_buffer,
             FLAGS_collect_metrics);
-  if (!FLAGS_load_state_filename.empty()) {
+  if (!FLAGS_load_state.empty()) {
     node.LoadState(FLAGS_load_state_filename, FLAGS_load_frozen_state);
   }
 

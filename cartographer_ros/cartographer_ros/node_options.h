@@ -28,6 +28,12 @@
 namespace cartographer_ros {
 
 // Top-level options of Cartographer's ROS integration.
+  /**
+   * 顶层选项配置。包括：
+   * 1. 建图相关的配置map_builder_options;
+   * 2. 发布各种信息 submap，pose，trajectory 的时间间隔。
+   * 3. 是否使用 extrapolator 进行初步位姿的猜测(默认true)。
+   */
 struct NodeOptions {
   ::cartographer::mapping::proto::MapBuilderOptions map_builder_options;
   std::string map_frame;

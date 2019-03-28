@@ -91,8 +91,12 @@ proto::MapBuilderOptions CreateMapBuilderOptions(
 
 MapBuilder::MapBuilder(const proto::MapBuilderOptions& options)
     : options_(options), thread_pool_(options.num_background_threads()) {
+  // ^ 异或运算符.
   CHECK(options.use_trajectory_builder_2d() ^
         options.use_trajectory_builder_3d());
+  /**
+   * 根据2d还是3d建图，实例化PoseGraph。 
+   */
   if (options.use_trajectory_builder_2d()) {
     pose_graph_ = absl::make_unique<PoseGraph2D>(
         options_.pose_graph_options(),
@@ -107,6 +111,7 @@ MapBuilder::MapBuilder(const proto::MapBuilderOptions& options)
             options_.pose_graph_options().optimization_problem_options()),
         &thread_pool_);
   }
+
   if (options.collate_by_trajectory()) {
     sensor_collator_ = absl::make_unique<sensor::TrajectoryCollator>();
   } else {
@@ -119,6 +124,7 @@ int MapBuilder::AddTrajectoryBuilder(
     const proto::TrajectoryBuilderOptions& trajectory_options,
     LocalSlamResultCallback local_slam_result_callback) {
   const int trajectory_id = trajectory_builders_.size();
+
   if (options_.use_trajectory_builder_3d()) {
     std::unique_ptr<LocalTrajectoryBuilder3D> local_trajectory_builder;
     if (trajectory_options.has_trajectory_builder_3d_options()) {
@@ -135,12 +141,26 @@ int MapBuilder::AddTrajectoryBuilder(
             static_cast<PoseGraph3D*>(pose_graph_.get()),
             local_slam_result_callback)));
   } else {
+    /**
+     * 选择距离传感, 创建一个LocalTrajectoryBuilder, 会包括：
+     * 1. ActiveSubmaps2D: 保存当前活跃的submap.
+     * 2. motion_fileter;
+     * 3. real_time_correlative_scan_matcher_;
+     * 4. ceres_scan_matcher;
+     * 5. range_data_collator.
+     */
     std::unique_ptr<LocalTrajectoryBuilder2D> local_trajectory_builder;
     if (trajectory_options.has_trajectory_builder_2d_options()) {
       local_trajectory_builder = absl::make_unique<LocalTrajectoryBuilder2D>(
           trajectory_options.trajectory_builder_2d_options(),
           SelectRangeSensorIds(expected_sensor_ids));
     }
+
+    /**
+     *  CollatedTrajectoryBuilder: 
+     *    Collates sensor data using a sensor::CollatorInterface, then passes it on
+     *    to a mapping::TrajectoryBuilderInterface which is common for 2D and 3D.
+     */
     DCHECK(dynamic_cast<PoseGraph2D*>(pose_graph_.get()));
     trajectory_builders_.push_back(absl::make_unique<CollatedTrajectoryBuilder>(
         trajectory_options, sensor_collator_.get(), trajectory_id,
@@ -150,9 +170,13 @@ int MapBuilder::AddTrajectoryBuilder(
             static_cast<PoseGraph2D*>(pose_graph_.get()),
             local_slam_result_callback)));
   }
+
   MaybeAddPureLocalizationTrimmer(trajectory_id, trajectory_options,
                                   pose_graph_.get());
 
+  /**
+   * 设置轨迹的初始位姿.
+   */
   if (trajectory_options.has_initial_trajectory_pose()) {
     const auto& initial_trajectory_pose =
         trajectory_options.initial_trajectory_pose();

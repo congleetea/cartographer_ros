@@ -27,7 +27,7 @@ std::vector<std::string> ComputeRepeatedTopicNames(const std::string& topic,
     return {topic};
   }
   std::vector<std::string> topics;
-  topics.reserve(num_topics);
+  topics.reserve(num_topics);  // reserve 预留vector的空间大小，但是size并没有变。 
   for (int i = 0; i < num_topics; ++i) {
     topics.emplace_back(topic + "_" + std::to_string(i + 1));
   }

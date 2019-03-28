@@ -87,18 +87,34 @@ using carto::transform::Rigid3d;
 using TrajectoryState =
     ::cartographer::mapping::PoseGraphInterface::TrajectoryState;
 
-Node::Node(
-    const NodeOptions& node_options,
+/**
+ * 实例化node，一开始就初始化了 map_builder_bridge_ (MapBuilderBridge).
+ */
+Node::Node(const NodeOptions& node_options,
     std::unique_ptr<cartographer::mapping::MapBuilderInterface> map_builder,
     tf2_ros::Buffer* const tf_buffer, const bool collect_metrics)
     : node_options_(node_options),
       map_builder_bridge_(node_options_, std::move(map_builder), tf_buffer) {
   absl::MutexLock lock(&mutex_);
+
+  /**
+   * 如果设置需要收集指标，则需要实例化一个注册器，将相应的指标在其中进行注册。
+   */
   if (collect_metrics) {
     metrics_registry_ = absl::make_unique<metrics::FamilyFactory>();
     carto::metrics::RegisterAllMetrics(metrics_registry_.get());
   }
 
+  /**
+   * 发布的信息： submap，trajectory，landmark_poses, constraint_list 信息。
+   * 后面会定时发布这些信息。
+   * 1. 激光产生submap，产生submap的过程中也会进行scanmatch。一旦submap确定之后就不会
+   *    再改变，而是通过新的scan来查找闭环，找到足够闭环之后将其加入到优化问题的约束
+   *    中。
+   * 2. trajectory 是机器人的位姿。
+   * 3. landmark_poses.
+   * 4. constraint_list.
+   */
   submap_list_publisher_ =
       node_handle_.advertise<::cartographer_ros_msgs::SubmapList>(
           kSubmapListTopic, kLatestOnlyPublisherQueueSize);
@@ -111,6 +127,16 @@ Node::Node(
   constraint_list_publisher_ =
       node_handle_.advertise<::visualization_msgs::MarkerArray>(
           kConstraintListTopic, kLatestOnlyPublisherQueueSize);
+
+  /**
+   * 启动一些列Services,其他线程可能会通过请求的方式从这里获取这些信息。
+   * 1. 请求submap: 请求所有submap.
+   * 2. StartTrajectory: 开始一条轨迹时要将对应的轨迹点插入保存.
+   * 3. FinishTrajectory: 完成一条轨迹.
+   * 4. GetTrajectoryStates: 获取轨迹状态.
+   * 5. HandleWriteState:
+   * 6. HandleReadMetrics: 获取一些指标参数.
+   */
   service_servers_.push_back(node_handle_.advertiseService(
       kSubmapQueryServiceName, &Node::HandleSubmapQuery, this));
   service_servers_.push_back(node_handle_.advertiseService(
@@ -124,6 +150,12 @@ Node::Node(
   service_servers_.push_back(node_handle_.advertiseService(
       kReadMetricsServiceName, &Node::HandleReadMetrics, this));
 
+  /**
+   * 设置发布器:
+   * 1. scan_matched_point_cloud, 发布激光点云信息，这是是进行什么处理吗? TODO.
+   * 2. 周期性的发布一些信息。这些信息可以通过上面的Service来获取:
+   *    周期性发布信息submap，trajectory，landmark_poses, constraint_list 信息.
+   */
   scan_matched_point_cloud_publisher_ =
       node_handle_.advertise<sensor_msgs::PointCloud2>(
           kScanMatchedPointCloudTopic, kLatestOnlyPublisherQueueSize);
@@ -164,6 +196,10 @@ void Node::PublishSubmapList(const ::ros::WallTimerEvent& unused_timer_event) {
   submap_list_publisher_.publish(map_builder_bridge_.GetSubmapList());
 }
 
+/**
+ * extrapolator 会保存一段时间的poses，一次推断角速度和线速度，进一步使用这些速度来
+ * 推断motion。
+ */
 void Node::AddExtrapolator(const int trajectory_id,
                            const TrajectoryOptions& options) {
   constexpr double kExtrapolationEstimationTimeSec = 0.001;  // 1 ms
@@ -181,6 +217,9 @@ void Node::AddExtrapolator(const int trajectory_id,
           gravity_time_constant));
 }
 
+/**
+ *  
+ */
 void Node::AddSensorSamplers(const int trajectory_id,
                              const TrajectoryOptions& options) {
   CHECK(sensor_samplers_.count(trajectory_id) == 0);
@@ -353,14 +392,27 @@ Node::ComputeExpectedSensorIds(
   return expected_topics;
 }
 
+/**
+ * 1. 给每个topic的消息确定一个id，一个topic可能有多个传感器发送数据，id是不同的.
+ * 2. 初始化轨迹, 初始化需要的工具，比如motion_filter, ceres_matcher等。
+ */
 int Node::AddTrajectory(const TrajectoryOptions& options,
                         const cartographer_ros_msgs::SensorTopics& topics) {
+
   const std::set<cartographer::mapping::TrajectoryBuilderInterface::SensorId>
       expected_sensor_ids = ComputeExpectedSensorIds(options, topics);
+
   const int trajectory_id =
       map_builder_bridge_.AddTrajectory(expected_sensor_ids, options);
+
+  // extrapolator 会保存一段时间的poses，一次推断角速度和线速度，进一步使用这些速度来
+  // 推断motion。
   AddExtrapolator(trajectory_id, options);
+
+  // 初始化传感器采样相关属性。 
   AddSensorSamplers(trajectory_id, options);
+
+  //  
   LaunchSubscribers(options, topics, trajectory_id);
   wall_timers_.push_back(node_handle_.createWallTimer(
       ::ros::WallDuration(kTopicMismatchCheckDelaySec),
@@ -374,6 +426,8 @@ int Node::AddTrajectory(const TrajectoryOptions& options,
 void Node::LaunchSubscribers(const TrajectoryOptions& options,
                              const cartographer_ros_msgs::SensorTopics& topics,
                              const int trajectory_id) {
+  // ComputeRepeatedTopicNames返回<topic>_<id>, 也就是给每个laser编序号。
+  // 因此这里是建立和num_laser_scans个laser topic的订阅, 执行回调 Node::HandleLaserScanMessage.
   for (const std::string& topic : ComputeRepeatedTopicNames(
            topics.laser_scan_topic, options.num_laser_scans)) {
     subscribers_[trajectory_id].push_back(
@@ -555,6 +609,9 @@ bool Node::HandleStartTrajectory(
   return true;
 }
 
+/**
+ * node的准备工作完成之后，这里开始启动, 也算是启动工作的入口了。
+ */
 void Node::StartTrajectoryWithDefaultTopics(const TrajectoryOptions& options) {
   absl::MutexLock lock(&mutex_);
   CHECK(ValidateTrajectoryOptions(options));
